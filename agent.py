@@ -184,7 +184,7 @@ def create_api_agent():
     """Create a LangGraph agent with our API tools"""
     
     # Initialize the LLM
-    llm = ChatOpenAI(model="gpt-4", temperature=0)
+    llm = ChatOpenAI(model="gpt-5")
     
     # List all our tools
     tools = [

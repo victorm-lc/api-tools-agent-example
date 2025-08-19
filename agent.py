@@ -8,33 +8,47 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_core.messages import HumanMessage
+from dotenv import load_dotenv
+load_dotenv()
+from langgraph.config import get_stream_writer
 
 
 # ============================================
-# EXAMPLE 1: SIMPLE GET API - JOKE API
+# EXAMPLE 1: SIMPLE GET API - GETS A JOKE AND STREAMS USING CUSTOM STREAM WRITER
 # ============================================
 
 @tool
 def get_random_joke() -> str:
-    """Get a random joke from the JokeAPI.
+    """Get a random joke by generating one with OpenAI streaming.
     
     Returns a random joke to lighten the mood.
     """
     try:
-        response = requests.get(
-            "https://official-joke-api.appspot.com/random_joke",
-            timeout=10
+        from openai import OpenAI
+        writer = get_stream_writer()
+        writer({"status": "Generating a joke...", "type": "status"})
+        
+        client = OpenAI()
+        
+        stream = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Tell me a short, clean joke with a setup and punchline."}],
+            stream=True
         )
-        response.raise_for_status()
         
-        data = response.json()
-        setup = data.get("setup", "")
-        punchline = data.get("punchline", "")
+        joke_content = ""
+        for chunk in stream:
+            if chunk.choices[0].delta.content is not None:
+                content = chunk.choices[0].delta.content
+                joke_content += content
+                writer({"content": content, "type": "joke_chunk"})
         
-        return f"Setup: {setup}\nPunchline: {punchline}"
+        writer({"status": "Joke complete!", "type": "status"})
+        return joke_content
         
     except Exception as e:
-        return f"Couldn't fetch a joke right now: {str(e)}"
+        return f"Couldn't generate a joke right now: {str(e)}"
 
 
 # ============================================
@@ -184,7 +198,7 @@ def create_api_agent():
     """Create a LangGraph agent with our API tools"""
     
     # Initialize the LLM
-    llm = ChatOpenAI(model="gpt-5")
+    llm = ChatOpenAI(model="gpt-4o")
     
     # List all our tools
     tools = [
@@ -231,3 +245,21 @@ def create_api_agent():
     
     # Compile the graph
     return workflow.compile()
+
+
+async def main():
+    print("Creating agent...")
+    agent = create_api_agent()
+    print("Starting stream...")
+    
+    try:
+        async for event in agent.astream(input={"messages": [HumanMessage(content="Tell me a joke")]}, stream_mode=["updates", "custom"]):
+            print(f"Event: {event}")
+    except Exception as e:
+        print(f"Error during streaming: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
